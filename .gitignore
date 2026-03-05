@@ -1,0 +1,14 @@
+# Build artifacts
+/target/
+
+# Database
+/data/
+
+# Logs
+/logs/
+
+# Work directory (git clones for builds)
+/work/
+
+# Environment
+.env
