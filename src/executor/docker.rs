@@ -72,7 +72,7 @@ impl DockerClient {
                     if let Some(error) = info.error {
                         let err_msg = format!("Build error: {}\n", error);
                         log_file.write_all(err_msg.as_bytes()).await?;
-                        return Err(ExecutorError::Git(error));
+                        return Err(ExecutorError::Build(error));
                     }
                 }
                 Err(e) => {
@@ -221,7 +221,7 @@ async fn create_tar_archive(dir: &Path) -> Result<Vec<u8>, ExecutorError> {
         Ok::<_, std::io::Error>(buffer)
     })
     .await
-    .map_err(|e| ExecutorError::Git(format!("Task join error: {}", e)))?;
+    .map_err(|e| ExecutorError::Build(format!("Task join error: {}", e)))?;
 
     result.map_err(ExecutorError::Io)
 }

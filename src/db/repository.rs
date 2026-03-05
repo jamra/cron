@@ -20,23 +20,22 @@ impl Repository {
         let id = Uuid::new_v4();
         let now = Utc::now();
         let schedule_json = req.schedule.as_ref().map(|s| serde_json::to_string(s).unwrap());
-        let dockerfile_path = req.dockerfile_path.unwrap_or_else(|| "Dockerfile".to_string());
+        let files_json = serde_json::to_string(&req.files).unwrap();
         let enabled = req.enabled.unwrap_or(true);
         let max_retries = req.max_retries.unwrap_or(0);
         let retry_delay_secs = req.retry_delay_secs.unwrap_or(60);
 
         sqlx::query(
             r#"
-            INSERT INTO jobs (id, name, description, git_repo, git_ref, dockerfile_path, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO jobs (id, name, description, dockerfile, files_json, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(id.to_string())
         .bind(&req.name)
         .bind(&req.description)
-        .bind(&req.git_repo)
-        .bind(&req.git_ref)
-        .bind(&dockerfile_path)
+        .bind(&req.dockerfile)
+        .bind(&files_json)
         .bind(&schedule_json)
         .bind(enabled)
         .bind(max_retries)
@@ -50,9 +49,8 @@ impl Repository {
             id,
             name: req.name,
             description: req.description,
-            git_repo: req.git_repo,
-            git_ref: req.git_ref,
-            dockerfile_path,
+            dockerfile: req.dockerfile,
+            files: req.files,
             schedule: req.schedule,
             enabled,
             max_retries,
@@ -65,7 +63,7 @@ impl Repository {
     pub async fn get_job(&self, id: Uuid) -> Result<Option<Job>, sqlx::Error> {
         let row: Option<JobRow> = sqlx::query_as(
             r#"
-            SELECT id, name, description, git_repo, git_ref, dockerfile_path, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at
+            SELECT id, name, description, dockerfile, files_json, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at
             FROM jobs WHERE id = ?
             "#,
         )
@@ -79,7 +77,7 @@ impl Repository {
     pub async fn list_jobs(&self) -> Result<Vec<Job>, sqlx::Error> {
         let rows: Vec<JobRow> = sqlx::query_as(
             r#"
-            SELECT id, name, description, git_repo, git_ref, dockerfile_path, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at
+            SELECT id, name, description, dockerfile, files_json, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at
             FROM jobs ORDER BY created_at DESC
             "#,
         )
@@ -92,7 +90,7 @@ impl Repository {
     pub async fn list_enabled_jobs_with_schedule(&self) -> Result<Vec<Job>, sqlx::Error> {
         let rows: Vec<JobRow> = sqlx::query_as(
             r#"
-            SELECT id, name, description, git_repo, git_ref, dockerfile_path, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at
+            SELECT id, name, description, dockerfile, files_json, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at
             FROM jobs WHERE enabled = 1 AND schedule_json IS NOT NULL
             "#,
         )
@@ -114,14 +112,11 @@ impl Repository {
         if let Some(description) = req.description {
             job.description = Some(description);
         }
-        if let Some(git_repo) = req.git_repo {
-            job.git_repo = git_repo;
+        if let Some(dockerfile) = req.dockerfile {
+            job.dockerfile = dockerfile;
         }
-        if let Some(git_ref) = req.git_ref {
-            job.git_ref = Some(git_ref);
-        }
-        if let Some(dockerfile_path) = req.dockerfile_path {
-            job.dockerfile_path = dockerfile_path;
+        if let Some(files) = req.files {
+            job.files = files;
         }
         if let Some(schedule) = req.schedule {
             job.schedule = Some(schedule);
@@ -138,18 +133,18 @@ impl Repository {
 
         job.updated_at = Utc::now();
         let schedule_json = job.schedule.as_ref().map(|s| serde_json::to_string(s).unwrap());
+        let files_json = serde_json::to_string(&job.files).unwrap();
 
         sqlx::query(
             r#"
-            UPDATE jobs SET name = ?, description = ?, git_repo = ?, git_ref = ?, dockerfile_path = ?, schedule_json = ?, enabled = ?, max_retries = ?, retry_delay_secs = ?, updated_at = ?
+            UPDATE jobs SET name = ?, description = ?, dockerfile = ?, files_json = ?, schedule_json = ?, enabled = ?, max_retries = ?, retry_delay_secs = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
         .bind(&job.name)
         .bind(&job.description)
-        .bind(&job.git_repo)
-        .bind(&job.git_ref)
-        .bind(&job.dockerfile_path)
+        .bind(&job.dockerfile)
+        .bind(&files_json)
         .bind(&schedule_json)
         .bind(job.enabled)
         .bind(job.max_retries)
@@ -326,9 +321,8 @@ struct JobRow {
     id: String,
     name: String,
     description: Option<String>,
-    git_repo: String,
-    git_ref: Option<String>,
-    dockerfile_path: String,
+    dockerfile: String,
+    files_json: String,
     schedule_json: Option<String>,
     enabled: bool,
     max_retries: u32,
@@ -343,9 +337,8 @@ impl JobRow {
             id: Uuid::parse_str(&self.id).unwrap(),
             name: self.name,
             description: self.description,
-            git_repo: self.git_repo,
-            git_ref: self.git_ref,
-            dockerfile_path: self.dockerfile_path,
+            dockerfile: self.dockerfile,
+            files: serde_json::from_str(&self.files_json).unwrap_or_default(),
             schedule: self.schedule_json.and_then(|s| serde_json::from_str(&s).ok()),
             enabled: self.enabled,
             max_retries: self.max_retries,

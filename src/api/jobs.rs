@@ -14,8 +14,8 @@ pub async fn create_job(
     if req.name.is_empty() {
         return Err(ApiError::BadRequest("name is required".to_string()));
     }
-    if req.git_repo.is_empty() {
-        return Err(ApiError::BadRequest("git_repo is required".to_string()));
+    if req.dockerfile.is_empty() {
+        return Err(ApiError::BadRequest("dockerfile is required".to_string()));
     }
 
     let job = state.repo.create_job(req).await?;

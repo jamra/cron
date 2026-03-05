@@ -29,9 +29,8 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT,
-            git_repo TEXT NOT NULL,
-            git_ref TEXT,
-            dockerfile_path TEXT NOT NULL DEFAULT 'Dockerfile',
+            dockerfile TEXT NOT NULL,
+            files_json TEXT NOT NULL DEFAULT '{}',
             schedule_json TEXT,
             enabled INTEGER NOT NULL DEFAULT 1,
             max_retries INTEGER NOT NULL DEFAULT 0,
@@ -43,14 +42,6 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
-
-    // Migration: add retry columns if they don't exist
-    let _ = sqlx::query("ALTER TABLE jobs ADD COLUMN max_retries INTEGER NOT NULL DEFAULT 0")
-        .execute(pool)
-        .await;
-    let _ = sqlx::query("ALTER TABLE jobs ADD COLUMN retry_delay_secs INTEGER NOT NULL DEFAULT 60")
-        .execute(pool)
-        .await;
 
     sqlx::query(
         r#"
@@ -70,11 +61,6 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
-
-    // Migration: add attempt column if it doesn't exist
-    let _ = sqlx::query("ALTER TABLE runs ADD COLUMN attempt INTEGER NOT NULL DEFAULT 1")
-        .execute(pool)
-        .await;
 
     sqlx::query(
         r#"

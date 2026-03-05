@@ -1,5 +1,4 @@
 mod docker;
-mod git;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -34,23 +33,6 @@ impl Executor {
     }
 
     /// Execute a run with automatic retries on failure.
-    ///
-    /// # Retry Behavior
-    ///
-    /// If `job.max_retries > 0` and the run fails:
-    /// 1. Mark current run as "retrying"
-    /// 2. Wait for `retry_delay_secs * 2^attempt` seconds (exponential backoff)
-    /// 3. Create a new run with incremented attempt number
-    /// 4. Execute the new run
-    /// 5. Repeat until success or max_retries reached
-    ///
-    /// # Example
-    ///
-    /// With `max_retries: 3` and `retry_delay_secs: 60`:
-    /// - Attempt 1: runs immediately
-    /// - Attempt 2: waits 60s after failure
-    /// - Attempt 3: waits 120s after failure
-    /// - Attempt 4: waits 240s after failure (final attempt)
     pub async fn execute_run(
         &self,
         repo: &Repository,
@@ -72,20 +54,16 @@ impl Executor {
 
             match result {
                 Ok(true) => {
-                    // Success
                     return Ok(());
                 }
                 Ok(false) | Err(_) => {
-                    // Failed - check if we should retry
                     let can_retry = current_run.attempt <= job.max_retries;
 
                     if can_retry {
-                        // Mark current run as retrying
                         repo.update_run_status(current_run.id, RunStatus::Retrying, None)
                             .await
                             .map_err(|e| ExecutorError::Database(e.to_string()))?;
 
-                        // Calculate backoff delay: base_delay * 2^(attempt-1)
                         let delay_secs = job.retry_delay_secs as u64
                             * (1u64 << (current_run.attempt - 1).min(10));
 
@@ -97,10 +75,8 @@ impl Executor {
                             job.max_retries + 1
                         );
 
-                        // Wait before retry
                         tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
 
-                        // Create new run for retry
                         current_run = repo
                             .create_run_with_attempt(
                                 job.id,
@@ -110,7 +86,6 @@ impl Executor {
                             .await
                             .map_err(|e| ExecutorError::Database(e.to_string()))?;
                     } else {
-                        // No more retries
                         tracing::info!(
                             "Run {} failed after {} attempts, no more retries",
                             current_run.id,
@@ -139,30 +114,25 @@ impl Executor {
         let run_logs_dir = self.logs_dir.join(run.id.to_string());
         tokio::fs::create_dir_all(&run_logs_dir).await?;
 
-        // Clone/pull the git repository
-        let repo_dir = self.work_dir.join(format!("{}_{}", job.id, run.id));
-        let git_ref = job.git_ref.as_deref().unwrap_or("main");
-
-        match git::clone_repo(&job.git_repo, git_ref, &repo_dir).await {
-            Ok(_) => tracing::info!("Cloned repository to {:?}", repo_dir),
-            Err(e) => {
-                tracing::error!("Failed to clone repository: {}", e);
-                self.write_log(run.id, "stderr", &format!("Failed to clone repository: {}\n", e))
-                    .await?;
-                repo.update_run_status(run.id, RunStatus::Failed, Some(1))
-                    .await
-                    .map_err(|e| ExecutorError::Database(e.to_string()))?;
-                return Ok(false);
-            }
+        // Create build context directory with Dockerfile and files
+        let build_dir = self.work_dir.join(format!("{}_{}", job.id, run.id));
+        if let Err(e) = self.prepare_build_context(job, &build_dir).await {
+            tracing::error!("Failed to prepare build context: {}", e);
+            self.write_log(run.id, "stderr", &format!("Failed to prepare build context: {}\n", e))
+                .await?;
+            repo.update_run_status(run.id, RunStatus::Failed, Some(1))
+                .await
+                .map_err(|e| ExecutorError::Database(e.to_string()))?;
+            return Ok(false);
         }
 
         // Build Docker image
         let image_tag = format!("scheduler-job-{}:{}", job.id, run.id);
-        let dockerfile_path = repo_dir.join(&job.dockerfile_path);
+        let dockerfile_path = build_dir.join("Dockerfile");
 
         match self
             .docker
-            .build_image(&repo_dir, &dockerfile_path, &image_tag, run.id, &self.logs_dir)
+            .build_image(&build_dir, &dockerfile_path, &image_tag, run.id, &self.logs_dir)
             .await
         {
             Ok(_) => tracing::info!("Built Docker image: {}", image_tag),
@@ -173,7 +143,7 @@ impl Executor {
                 repo.update_run_status(run.id, RunStatus::Failed, Some(1))
                     .await
                     .map_err(|e| ExecutorError::Database(e.to_string()))?;
-                let _ = tokio::fs::remove_dir_all(&repo_dir).await;
+                let _ = tokio::fs::remove_dir_all(&build_dir).await;
                 return Ok(false);
             }
         }
@@ -191,7 +161,7 @@ impl Executor {
                 repo.update_run_status(run.id, RunStatus::Failed, Some(1))
                     .await
                     .map_err(|e| ExecutorError::Database(e.to_string()))?;
-                let _ = tokio::fs::remove_dir_all(&repo_dir).await;
+                let _ = tokio::fs::remove_dir_all(&build_dir).await;
                 return Ok(false);
             }
         };
@@ -217,7 +187,7 @@ impl Executor {
         // Clean up container and image
         let _ = self.docker.remove_container(&container_id).await;
         let _ = self.docker.remove_image(&image_tag).await;
-        let _ = tokio::fs::remove_dir_all(&repo_dir).await;
+        let _ = tokio::fs::remove_dir_all(&build_dir).await;
 
         // Update final status
         let (status, code, success) = match exit_code {
@@ -235,6 +205,38 @@ impl Executor {
 
         tracing::info!("Run {} completed with status {:?}", run.id, status);
         Ok(success)
+    }
+
+    /// Prepare the build context directory with Dockerfile and user files.
+    async fn prepare_build_context(
+        &self,
+        job: &Job,
+        build_dir: &PathBuf,
+    ) -> Result<(), ExecutorError> {
+        // Clean up if exists
+        if build_dir.exists() {
+            tokio::fs::remove_dir_all(build_dir).await?;
+        }
+        tokio::fs::create_dir_all(build_dir).await?;
+
+        // Write Dockerfile
+        let dockerfile_path = build_dir.join("Dockerfile");
+        tokio::fs::write(&dockerfile_path, &job.dockerfile).await?;
+
+        // Write all user files
+        for (filename, content) in &job.files {
+            let file_path = build_dir.join(filename);
+
+            // Create parent directories if needed
+            if let Some(parent) = file_path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+
+            tokio::fs::write(&file_path, content).await?;
+        }
+
+        tracing::info!("Prepared build context at {:?} with {} files", build_dir, job.files.len());
+        Ok(())
     }
 
     pub async fn cancel_run(&self, run_id: Uuid) {
@@ -287,8 +289,8 @@ pub enum ExecutorError {
     #[error("Docker error: {0}")]
     Docker(#[from] bollard::errors::Error),
 
-    #[error("Git error: {0}")]
-    Git(String),
+    #[error("Build error: {0}")]
+    Build(String),
 
     #[error("Database error: {0}")]
     Database(String),

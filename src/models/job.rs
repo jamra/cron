@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -7,9 +8,8 @@ pub struct Job {
     pub id: Uuid,
     pub name: String,
     pub description: Option<String>,
-    pub git_repo: String,
-    pub git_ref: Option<String>,
-    pub dockerfile_path: String,
+    pub dockerfile: String,
+    pub files: HashMap<String, String>,
     pub schedule: Option<Schedule>,
     pub enabled: bool,
     pub max_retries: u32,
@@ -17,7 +17,6 @@ pub struct Job {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -76,9 +75,9 @@ impl Weekday {
 pub struct CreateJobRequest {
     pub name: String,
     pub description: Option<String>,
-    pub git_repo: String,
-    pub git_ref: Option<String>,
-    pub dockerfile_path: Option<String>,
+    pub dockerfile: String,
+    #[serde(default)]
+    pub files: HashMap<String, String>,
     pub schedule: Option<Schedule>,
     pub enabled: Option<bool>,
     pub max_retries: Option<u32>,
@@ -89,9 +88,8 @@ pub struct CreateJobRequest {
 pub struct UpdateJobRequest {
     pub name: Option<String>,
     pub description: Option<String>,
-    pub git_repo: Option<String>,
-    pub git_ref: Option<String>,
-    pub dockerfile_path: Option<String>,
+    pub dockerfile: Option<String>,
+    pub files: Option<HashMap<String, String>>,
     pub schedule: Option<Schedule>,
     pub enabled: Option<bool>,
     pub max_retries: Option<u32>,
