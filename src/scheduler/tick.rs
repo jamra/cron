@@ -108,12 +108,8 @@ impl Scheduler {
         let next_run = match last_run {
             Some(run) => calculate_next_run(schedule, run.created_at),
             None => {
-                // Never run before - for intervals, run immediately
-                // For fixed schedules, calculate next occurrence
-                match schedule {
-                    Schedule::Interval { .. } => now,
-                    _ => calculate_next_run(schedule, now - Duration::days(1)),
-                }
+                // Never run before - calculate next run from now
+                calculate_next_run(schedule, now)
             }
         };
 
@@ -261,7 +257,7 @@ impl Scheduler {
                 let last_run = self.repo.get_last_run_for_job(job.id).await.ok().flatten();
                 let next_run = match last_run {
                     Some(run) => calculate_next_run(schedule, run.created_at),
-                    None => now,
+                    None => calculate_next_run(schedule, now),
                 };
 
                 let mut queue = self.queue.write().await;
