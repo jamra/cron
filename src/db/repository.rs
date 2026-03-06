@@ -27,8 +27,8 @@ impl Repository {
 
         sqlx::query(
             r#"
-            INSERT INTO jobs (id, name, description, dockerfile, files_json, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO jobs (id, name, description, dockerfile, files_json, schedule_json, enabled, timeout_secs, max_retries, retry_delay_secs, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(id.to_string())
@@ -38,6 +38,7 @@ impl Repository {
         .bind(&files_json)
         .bind(&schedule_json)
         .bind(enabled)
+        .bind(req.timeout_secs)
         .bind(max_retries)
         .bind(retry_delay_secs)
         .bind(now.to_rfc3339())
@@ -53,6 +54,7 @@ impl Repository {
             files: req.files,
             schedule: req.schedule,
             enabled,
+            timeout_secs: req.timeout_secs,
             max_retries,
             retry_delay_secs,
             created_at: now,
@@ -63,7 +65,7 @@ impl Repository {
     pub async fn get_job(&self, id: Uuid) -> Result<Option<Job>, sqlx::Error> {
         let row: Option<JobRow> = sqlx::query_as(
             r#"
-            SELECT id, name, description, dockerfile, files_json, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at
+            SELECT id, name, description, dockerfile, files_json, schedule_json, enabled, timeout_secs, max_retries, retry_delay_secs, created_at, updated_at
             FROM jobs WHERE id = ?
             "#,
         )
@@ -77,7 +79,7 @@ impl Repository {
     pub async fn list_jobs(&self) -> Result<Vec<Job>, sqlx::Error> {
         let rows: Vec<JobRow> = sqlx::query_as(
             r#"
-            SELECT id, name, description, dockerfile, files_json, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at
+            SELECT id, name, description, dockerfile, files_json, schedule_json, enabled, timeout_secs, max_retries, retry_delay_secs, created_at, updated_at
             FROM jobs ORDER BY created_at DESC
             "#,
         )
@@ -90,7 +92,7 @@ impl Repository {
     pub async fn list_enabled_jobs_with_schedule(&self) -> Result<Vec<Job>, sqlx::Error> {
         let rows: Vec<JobRow> = sqlx::query_as(
             r#"
-            SELECT id, name, description, dockerfile, files_json, schedule_json, enabled, max_retries, retry_delay_secs, created_at, updated_at
+            SELECT id, name, description, dockerfile, files_json, schedule_json, enabled, timeout_secs, max_retries, retry_delay_secs, created_at, updated_at
             FROM jobs WHERE enabled = 1 AND schedule_json IS NOT NULL
             "#,
         )
@@ -124,6 +126,9 @@ impl Repository {
         if let Some(enabled) = req.enabled {
             job.enabled = enabled;
         }
+        if let Some(timeout_secs) = req.timeout_secs {
+            job.timeout_secs = Some(timeout_secs);
+        }
         if let Some(max_retries) = req.max_retries {
             job.max_retries = max_retries;
         }
@@ -137,7 +142,7 @@ impl Repository {
 
         sqlx::query(
             r#"
-            UPDATE jobs SET name = ?, description = ?, dockerfile = ?, files_json = ?, schedule_json = ?, enabled = ?, max_retries = ?, retry_delay_secs = ?, updated_at = ?
+            UPDATE jobs SET name = ?, description = ?, dockerfile = ?, files_json = ?, schedule_json = ?, enabled = ?, timeout_secs = ?, max_retries = ?, retry_delay_secs = ?, updated_at = ?
             WHERE id = ?
             "#,
         )
@@ -147,6 +152,7 @@ impl Repository {
         .bind(&files_json)
         .bind(&schedule_json)
         .bind(job.enabled)
+        .bind(job.timeout_secs)
         .bind(job.max_retries)
         .bind(job.retry_delay_secs)
         .bind(job.updated_at.to_rfc3339())
@@ -325,6 +331,7 @@ struct JobRow {
     files_json: String,
     schedule_json: Option<String>,
     enabled: bool,
+    timeout_secs: Option<u32>,
     max_retries: u32,
     retry_delay_secs: u32,
     created_at: String,
@@ -341,6 +348,7 @@ impl JobRow {
             files: serde_json::from_str(&self.files_json).unwrap_or_default(),
             schedule: self.schedule_json.and_then(|s| serde_json::from_str(&s).ok()),
             enabled: self.enabled,
+            timeout_secs: self.timeout_secs,
             max_retries: self.max_retries,
             retry_delay_secs: self.retry_delay_secs,
             created_at: DateTime::parse_from_rfc3339(&self.created_at)

@@ -33,6 +33,7 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             files_json TEXT NOT NULL DEFAULT '{}',
             schedule_json TEXT,
             enabled INTEGER NOT NULL DEFAULT 1,
+            timeout_secs INTEGER,
             max_retries INTEGER NOT NULL DEFAULT 0,
             retry_delay_secs INTEGER NOT NULL DEFAULT 60,
             created_at TEXT NOT NULL,
@@ -42,6 +43,11 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    // Migration: add timeout_secs column if it doesn't exist
+    let _ = sqlx::query("ALTER TABLE jobs ADD COLUMN timeout_secs INTEGER")
+        .execute(pool)
+        .await;
 
     sqlx::query(
         r#"

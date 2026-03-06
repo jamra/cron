@@ -12,6 +12,7 @@ pub struct Job {
     pub files: HashMap<String, String>,
     pub schedule: Option<Schedule>,
     pub enabled: bool,
+    pub timeout_secs: Option<u32>,
     pub max_retries: u32,
     pub retry_delay_secs: u32,
     pub created_at: DateTime<Utc>,
@@ -80,6 +81,7 @@ pub struct CreateJobRequest {
     pub files: HashMap<String, String>,
     pub schedule: Option<Schedule>,
     pub enabled: Option<bool>,
+    pub timeout_secs: Option<u32>,
     pub max_retries: Option<u32>,
     pub retry_delay_secs: Option<u32>,
 }
@@ -92,6 +94,7 @@ pub struct UpdateJobRequest {
     pub files: Option<HashMap<String, String>>,
     pub schedule: Option<Schedule>,
     pub enabled: Option<bool>,
+    pub timeout_secs: Option<u32>,
     pub max_retries: Option<u32>,
     pub retry_delay_secs: Option<u32>,
 }

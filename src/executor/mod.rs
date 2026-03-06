@@ -172,11 +172,33 @@ impl Executor {
             containers.insert(run.id, container_id.clone());
         }
 
-        // Start the container and stream logs
-        let exit_code = self
-            .docker
-            .run_container(&container_id, run.id, &self.logs_dir)
-            .await;
+        // Start the container and stream logs, with optional timeout
+        let container_future = self.docker.run_container(&container_id, run.id, &self.logs_dir);
+
+        let (exit_code, timed_out) = if let Some(timeout_secs) = job.timeout_secs {
+            let timeout_duration = std::time::Duration::from_secs(timeout_secs as u64);
+            match tokio::time::timeout(timeout_duration, container_future).await {
+                Ok(result) => (result, false),
+                Err(_) => {
+                    tracing::warn!(
+                        "Run {} timed out after {} seconds, killing container",
+                        run.id,
+                        timeout_secs
+                    );
+                    // Kill the container forcefully
+                    let _ = self.docker.stop_container(&container_id).await;
+                    self.write_log(
+                        run.id,
+                        "stderr",
+                        &format!("\n--- TIMEOUT: Job exceeded {} second limit, container killed ---\n", timeout_secs),
+                    )
+                    .await?;
+                    (Err(ExecutorError::Timeout(timeout_secs)), true)
+                }
+            }
+        } else {
+            (container_future.await, false)
+        };
 
         // Remove from tracking
         {
@@ -190,12 +212,16 @@ impl Executor {
         let _ = tokio::fs::remove_dir_all(&build_dir).await;
 
         // Update final status
-        let (status, code, success) = match exit_code {
-            Ok(0) => (RunStatus::Succeeded, Some(0), true),
-            Ok(code) => (RunStatus::Failed, Some(code as i32), false),
-            Err(e) => {
-                tracing::error!("Container execution failed: {}", e);
-                (RunStatus::Failed, Some(1), false)
+        let (status, code, success) = if timed_out {
+            (RunStatus::TimedOut, None, false)
+        } else {
+            match exit_code {
+                Ok(0) => (RunStatus::Succeeded, Some(0), true),
+                Ok(code) => (RunStatus::Failed, Some(code as i32), false),
+                Err(e) => {
+                    tracing::error!("Container execution failed: {}", e);
+                    (RunStatus::Failed, Some(1), false)
+                }
             }
         };
 
@@ -294,4 +320,7 @@ pub enum ExecutorError {
 
     #[error("Database error: {0}")]
     Database(String),
+
+    #[error("Timeout: job exceeded {0} second limit")]
+    Timeout(u32),
 }

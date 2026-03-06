@@ -76,6 +76,7 @@ curl -X POST http://localhost:3000/api/jobs \
 | `files` | No | {} | Map of filename → file contents |
 | `schedule` | No | null | When to run (null = manual only) |
 | `enabled` | No | true | Whether job is active |
+| `timeout_secs` | No | null | Maximum execution time in seconds |
 | `max_retries` | No | 0 | Retry attempts on failure |
 | `retry_delay_secs` | No | 60 | Base delay between retries |
 
@@ -97,6 +98,20 @@ curl -X POST http://localhost:3000/api/jobs \
 // Run on the 1st of each month at midnight
 { "type": "monthly", "day": 1, "hour": 0, "minute": 0 }
 ```
+
+### Timeout Configuration
+
+Jobs can have an optional timeout to prevent runaway containers:
+
+```json
+{
+  "name": "my-job",
+  "dockerfile": "FROM alpine...",
+  "timeout_secs": 300
+}
+```
+
+If a job exceeds its timeout, the container is forcefully killed and the run is marked as `timed_out`. This prevents frozen or hung jobs from consuming resources indefinitely.
 
 ### Retry Configuration
 
@@ -254,6 +269,7 @@ Environment variables:
 - `running` - Currently executing
 - `succeeded` - Completed with exit code 0
 - `failed` - Completed with non-zero exit code
+- `timed_out` - Exceeded configured timeout, container killed
 - `retrying` - Failed but will retry
 - `cancelled` - Manually cancelled
 

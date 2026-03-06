@@ -22,6 +22,7 @@ pub enum RunStatus {
     Running,
     Succeeded,
     Failed,
+    TimedOut,
     Retrying,
     Cancelled,
 }
@@ -33,6 +34,7 @@ impl RunStatus {
             RunStatus::Running => "running",
             RunStatus::Succeeded => "succeeded",
             RunStatus::Failed => "failed",
+            RunStatus::TimedOut => "timed_out",
             RunStatus::Retrying => "retrying",
             RunStatus::Cancelled => "cancelled",
         }
@@ -44,6 +46,7 @@ impl RunStatus {
             "running" => Some(RunStatus::Running),
             "succeeded" => Some(RunStatus::Succeeded),
             "failed" => Some(RunStatus::Failed),
+            "timed_out" => Some(RunStatus::TimedOut),
             "retrying" => Some(RunStatus::Retrying),
             "cancelled" => Some(RunStatus::Cancelled),
             _ => None,
